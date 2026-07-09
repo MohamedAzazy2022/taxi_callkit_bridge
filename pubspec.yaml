@@ -1,7 +1,6 @@
-﻿name: taxi_callkit_bridge
+name: taxi_callkit_bridge
 description: Taxi native CallKit bridge.
-version: 0.0.5
-homepage:
+version: 0.0.6
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
