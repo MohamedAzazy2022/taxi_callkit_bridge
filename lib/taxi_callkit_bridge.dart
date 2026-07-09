@@ -1,4 +1,5 @@
-﻿import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+﻿import 'package:flutter/services.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/entities/call_event.dart';
 import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
@@ -6,6 +7,17 @@ import 'package:flutter_callkit_incoming/entities/ios_params.dart';
 import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 
 class TaxiCallkitBridge {
+  static const MethodChannel _channel = MethodChannel('taxi_callkit_bridge');
+
+  static Future<Map<String, dynamic>?> getInitialNativeCallAction() async {
+    final result = await _channel.invokeMethod<dynamic>('getInitialNativeCallAction');
+
+    if (result is Map) {
+      return Map<String, dynamic>.from(result);
+    }
+
+    return null;
+  }
   TaxiCallkitBridge();
 
   Future<String?> getPlatformVersion() async {
@@ -229,3 +241,4 @@ class TaxiCallkitBridge {
     return FlutterCallkitIncoming.getDevicePushTokenVoIP();
   }
 }
+
