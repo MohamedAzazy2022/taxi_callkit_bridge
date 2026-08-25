@@ -71,11 +71,13 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
 
     registrar.addMethodCallDelegate(instance, channel: baseChannel)
     instance.registerCompatibilityChannelIfNeeded(messenger: messenger)
+    instance.startNativeLayerIfNeeded()
 
     NSLog(
       "[TaxiCallkitBridge] iOS owner mode=\(configuredOwner.rawValue), " +
       "legacyAppDelegateDetected=\(legacyDetected), " +
-      "pluginOwnsNativeLayer=\(ownsNativeLayer), nativeLayerStarted=false"
+      "pluginOwnsNativeLayer=\(ownsNativeLayer), " +
+      "nativeLayerStarted=\(instance.nativeLayerStarted)"
     )
   }
 
@@ -131,6 +133,35 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
     }
 
     compatibilityChannel = channel
+  }
+
+  private func startNativeLayerIfNeeded() {
+    guard pluginOwnsNativeLayer else {
+      nativeLayerStarted = false
+
+      NSLog(
+        "[TaxiCallkitBridge] Native iOS layer remains owned by AppDelegate."
+      )
+
+      return
+    }
+
+    setupCallKit()
+    setupPushKit()
+
+    nativeLayerStarted =
+      callProvider != nil &&
+      voipRegistry != nil
+
+    if nativeLayerStarted {
+      NSLog(
+        "[TaxiCallkitBridge] Native iOS PushKit and CallKit layer started."
+      )
+    } else {
+      NSLog(
+        "[TaxiCallkitBridge] Native iOS layer failed to start completely."
+      )
+    }
   }
 
   private func handleCompatibilityCall(
