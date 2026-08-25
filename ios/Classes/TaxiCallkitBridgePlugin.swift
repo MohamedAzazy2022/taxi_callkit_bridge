@@ -21,6 +21,15 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin {
   private let legacyAppDelegateDetected: Bool
   private let pluginOwnsNativeLayer: Bool
 
+  private var nativeLayerStarted = false
+  private var callKitAudioSessionActive = false
+  private var lastVoipToken: String?
+  private var initialVoipAction: [String: Any]?
+
+  private var callProvider: CXProvider?
+  private var activeCallUUIDByCallId: [String: UUID] = [:]
+  private var activeCallDataByUUID: [UUID: [String: Any]] = [:]
+
   private init(
     baseChannel: FlutterMethodChannel,
     configuredOwner: IOSNativeOwnerMode,
@@ -77,12 +86,15 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin {
     case "getPlatformVersion":
       result("iOS " + UIDevice.current.systemVersion)
 
+    case "getInitialNativeCallAction":
+      result(takeInitialVoipAction())
+
     case "getIosNativeOwnerState":
       result([
         "configuredOwner": configuredOwner.rawValue,
         "legacyAppDelegateDetected": legacyAppDelegateDetected,
         "pluginOwnsNativeLayer": pluginOwnsNativeLayer,
-        "nativeLayerStarted": false
+        "nativeLayerStarted": nativeLayerStarted
       ])
 
     default:
@@ -124,7 +136,117 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin {
     _ call: FlutterMethodCall,
     result: @escaping FlutterResult
   ) {
-    result(FlutterMethodNotImplemented)
+    switch call.method {
+    case "requestMicrophonePermission":
+      AVAudioSession.sharedInstance().requestRecordPermission { granted in
+        DispatchQueue.main.async {
+          result(granted)
+        }
+      }
+
+    case "configureVoiceAudioSession":
+      result(configureVoiceAudioSession())
+
+    case "isCallKitAudioActive":
+      result(callKitAudioSessionActive)
+
+    case "getVoipToken":
+      result(lastVoipToken)
+
+    case "getInitialVoipAction":
+      result(takeInitialVoipAction())
+
+    case "endIosCall":
+      if
+        let arguments = call.arguments as? [String: Any],
+        let callId = arguments["callId"] as? String
+      {
+        endCall(callId: callId)
+      }
+      result(nil)
+
+    case "endAllIosCalls":
+      endAllCalls()
+      result(nil)
+
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  private func takeInitialVoipAction() -> [String: Any]? {
+    let action = initialVoipAction
+    initialVoipAction = nil
+    return action
+  }
+
+  private func configureVoiceAudioSession() -> Bool {
+    let audioSession = AVAudioSession.sharedInstance()
+
+    do {
+      try audioSession.setCategory(
+        .playAndRecord,
+        mode: .voiceChat,
+        options: [.allowBluetoothHFP, .defaultToSpeaker]
+      )
+      try audioSession.setActive(true)
+
+      callKitAudioSessionActive = true
+
+      compatibilityChannel?.invokeMethod(
+        "iosAudioSessionActivated",
+        arguments: [
+          "active": true,
+          "source": "direct"
+        ]
+      )
+
+      return true
+    } catch {
+      NSLog(
+        "[TaxiCallkitBridge] Failed to configure voice audio session: \(error)"
+      )
+      return false
+    }
+  }
+
+  private func endCall(callId: String) {
+    guard let uuid = activeCallUUIDByCallId[callId] else {
+      return
+    }
+
+    callProvider?.reportCall(
+      with: uuid,
+      endedAt: Date(),
+      reason: .remoteEnded
+    )
+
+    cleanupCall(uuid: uuid)
+  }
+
+  private func endAllCalls() {
+    let uuids = Array(activeCallDataByUUID.keys)
+
+    for uuid in uuids {
+      callProvider?.reportCall(
+        with: uuid,
+        endedAt: Date(),
+        reason: .remoteEnded
+      )
+
+      cleanupCall(uuid: uuid)
+    }
+  }
+
+  private func cleanupCall(uuid: UUID) {
+    if
+      let data = activeCallDataByUUID[uuid],
+      let callId = data["callId"] as? String
+    {
+      activeCallUUIDByCallId.removeValue(forKey: callId)
+    }
+
+    activeCallDataByUUID.removeValue(forKey: uuid)
   }
 
   private static func readConfiguredOwner() -> IOSNativeOwnerMode {
