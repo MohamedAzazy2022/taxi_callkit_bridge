@@ -4,7 +4,7 @@ import PushKit
 import CallKit
 import AVFoundation
 
-public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin {
+public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderDelegate {
   private enum IOSNativeOwnerMode: String {
     case auto
     case legacy
@@ -208,6 +208,116 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin {
       )
       return false
     }
+  }
+
+  private func setupCallKit() {
+    guard callProvider == nil else {
+      return
+    }
+
+    let configuration = CXProviderConfiguration(localizedName: "Galal")
+    configuration.supportsVideo = false
+    configuration.maximumCallGroups = 1
+    configuration.maximumCallsPerCallGroup = 1
+    configuration.supportedHandleTypes = [.generic]
+    configuration.includesCallsInRecents = false
+
+    let provider = CXProvider(configuration: configuration)
+    provider.setDelegate(self, queue: nil)
+    callProvider = provider
+  }
+
+  public func providerDidReset(_ provider: CXProvider) {
+    activeCallUUIDByCallId.removeAll()
+    activeCallDataByUUID.removeAll()
+  }
+
+  public func provider(
+    _ provider: CXProvider,
+    didActivate audioSession: AVAudioSession
+  ) {
+    callKitAudioSessionActive = true
+
+    do {
+      try audioSession.setCategory(
+        .playAndRecord,
+        mode: .voiceChat,
+        options: [.allowBluetoothHFP, .defaultToSpeaker]
+      )
+      try audioSession.setActive(true)
+    } catch {
+      NSLog(
+        "[TaxiCallkitBridge] CallKit audio activation failed: \(error)"
+      )
+    }
+
+    compatibilityChannel?.invokeMethod(
+      "iosAudioSessionActivated",
+      arguments: [
+        "active": true
+      ]
+    )
+  }
+
+  public func provider(
+    _ provider: CXProvider,
+    didDeactivate audioSession: AVAudioSession
+  ) {
+    callKitAudioSessionActive = false
+
+    compatibilityChannel?.invokeMethod(
+      "iosAudioSessionDeactivated",
+      arguments: [
+        "active": false
+      ]
+    )
+  }
+
+  public func provider(
+    _ provider: CXProvider,
+    perform action: CXAnswerCallAction
+  ) {
+    let uuid = action.callUUID
+
+    let callData = activeCallDataByUUID[uuid] ?? [
+      "nativeCallId": uuid.uuidString
+    ]
+
+    var data = callData
+    data["action"] = "accept"
+
+    initialVoipAction = data
+
+    compatibilityChannel?.invokeMethod(
+      "iosCallAccepted",
+      arguments: data
+    )
+
+    action.fulfill()
+  }
+
+  public func provider(
+    _ provider: CXProvider,
+    perform action: CXEndCallAction
+  ) {
+    let uuid = action.callUUID
+
+    let callData = activeCallDataByUUID[uuid] ?? [
+      "nativeCallId": uuid.uuidString
+    ]
+
+    var data = callData
+    data["action"] = "ended"
+
+    initialVoipAction = data
+
+    compatibilityChannel?.invokeMethod(
+      "iosCallEnded",
+      arguments: data
+    )
+
+    cleanupCall(uuid: uuid)
+    action.fulfill()
   }
 
   private func endCall(callId: String) {
