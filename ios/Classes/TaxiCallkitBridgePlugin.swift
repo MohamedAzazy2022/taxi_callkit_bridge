@@ -4,7 +4,7 @@ import PushKit
 import CallKit
 import AVFoundation
 
-public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderDelegate {
+public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderDelegate, PKPushRegistryDelegate {
   private enum IOSNativeOwnerMode: String {
     case auto
     case legacy
@@ -26,6 +26,7 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
   private var lastVoipToken: String?
   private var initialVoipAction: [String: Any]?
 
+  private var voipRegistry: PKPushRegistry?
   private var callProvider: CXProvider?
   private var activeCallUUIDByCallId: [String: UUID] = [:]
   private var activeCallDataByUUID: [UUID: [String: Any]] = [:]
@@ -208,6 +209,215 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
       )
       return false
     }
+  }
+
+  private func setupPushKit() {
+    guard voipRegistry == nil else {
+      return
+    }
+
+    let registry = PKPushRegistry(queue: DispatchQueue.main)
+    registry.delegate = self
+    registry.desiredPushTypes = [.voIP]
+    voipRegistry = registry
+  }
+
+  public func pushRegistry(
+    _ registry: PKPushRegistry,
+    didUpdate pushCredentials: PKPushCredentials,
+    for type: PKPushType
+  ) {
+    guard type == .voIP else {
+      return
+    }
+
+    let token = pushCredentials.token
+      .map { String(format: "%02x", $0) }
+      .joined()
+
+    lastVoipToken = token
+
+    compatibilityChannel?.invokeMethod(
+      "voipTokenUpdated",
+      arguments: [
+        "token": token
+      ]
+    )
+  }
+
+  public func pushRegistry(
+    _ registry: PKPushRegistry,
+    didInvalidatePushTokenFor type: PKPushType
+  ) {
+    guard type == .voIP else {
+      return
+    }
+
+    lastVoipToken = nil
+
+    compatibilityChannel?.invokeMethod(
+      "voipTokenInvalidated",
+      arguments: nil
+    )
+  }
+
+  public func pushRegistry(
+    _ registry: PKPushRegistry,
+    didReceiveIncomingPushWith payload: PKPushPayload,
+    for type: PKPushType,
+    completion: @escaping () -> Void
+  ) {
+    guard type == .voIP else {
+      completion()
+      return
+    }
+
+    let payloadDictionary = payload.dictionaryPayload
+
+    let requestedCallId = payloadString(
+      payloadDictionary,
+      key: "callId"
+    )
+
+    let callId = requestedCallId.isEmpty
+      ? UUID().uuidString
+      : requestedCallId
+
+    let requestedCallerName = payloadString(
+      payloadDictionary,
+      key: "callerName"
+    )
+
+    let callerName = requestedCallerName.isEmpty
+      ? "مكالمة واردة"
+      : requestedCallerName
+
+    let channelName = payloadString(
+      payloadDictionary,
+      key: "channelName"
+    )
+
+    let callerUid = payloadString(
+      payloadDictionary,
+      key: "callerUid"
+    )
+
+    let receiverUid = payloadString(
+      payloadDictionary,
+      key: "receiverUid"
+    )
+
+    if UIApplication.shared.applicationState == .active {
+      let foregroundData: [String: Any] = [
+        "callId": callId,
+        "callerName": callerName,
+        "channelName": channelName,
+        "callerUid": callerUid,
+        "receiverUid": receiverUid,
+        "action": "foreground"
+      ]
+
+      compatibilityChannel?.invokeMethod(
+        "iosIncomingCallForeground",
+        arguments: foregroundData
+      )
+
+      completion()
+      return
+    }
+
+    let uuid = UUID()
+
+    activeCallUUIDByCallId[callId] = uuid
+
+    let callData: [String: Any] = [
+      "callId": callId,
+      "callerName": callerName,
+      "channelName": channelName,
+      "callerUid": callerUid,
+      "receiverUid": receiverUid,
+      "nativeCallId": uuid.uuidString
+    ]
+
+    activeCallDataByUUID[uuid] = callData
+
+    let update = CXCallUpdate()
+    update.remoteHandle = CXHandle(
+      type: .generic,
+      value: callerName
+    )
+    update.localizedCallerName = callerName
+    update.hasVideo = false
+
+    guard let provider = callProvider else {
+      cleanupCall(uuid: uuid)
+
+      NSLog(
+        "[TaxiCallkitBridge] Incoming VoIP push received without CXProvider."
+      )
+
+      completion()
+      return
+    }
+
+    provider.reportNewIncomingCall(
+      with: uuid,
+      update: update
+    ) { [weak self] error in
+      if let error = error {
+        self?.cleanupCall(uuid: uuid)
+
+        NSLog(
+          "[TaxiCallkitBridge] Failed to report incoming call: \(error)"
+        )
+      } else {
+        self?.compatibilityChannel?.invokeMethod(
+          "iosIncomingCallShown",
+          arguments: callData
+        )
+      }
+
+      completion()
+    }
+  }
+
+  private func payloadString(
+    _ payload: [AnyHashable: Any],
+    key: String
+  ) -> String {
+    if let value = payload[key] {
+      return "\(value)"
+    }
+
+    if
+      let data = payload["data"] as? [String: Any],
+      let value = data[key]
+    {
+      return "\(value)"
+    }
+
+    if
+      let data = payload["data"] as? [AnyHashable: Any],
+      let value = data[key]
+    {
+      return "\(value)"
+    }
+
+    if
+      let aps = payload["aps"] as? [String: Any],
+      let value = aps[key]
+    {
+      return "\(value)"
+    }
+
+    if
+      let aps = payload["aps"] as? [AnyHashable: Any],
+      let value = aps[key]
+    {
+      return "\(value)"
+    }
+
+    return ""
   }
 
   private func setupCallKit() {
