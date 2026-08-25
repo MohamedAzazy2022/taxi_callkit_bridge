@@ -1,4 +1,5 @@
-﻿import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/entities/call_event.dart';
@@ -8,9 +9,12 @@ import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 
 class TaxiCallkitBridge {
   static const MethodChannel _channel = MethodChannel('taxi_callkit_bridge');
+  static const MethodChannel _iosCompatibilityChannel =
+      MethodChannel('taxi_ios_voip_callkit');
 
   static Future<Map<String, dynamic>?> getInitialNativeCallAction() async {
-    final result = await _channel.invokeMethod<dynamic>('getInitialNativeCallAction');
+    final result =
+        await _channel.invokeMethod<dynamic>('getInitialNativeCallAction');
 
     if (result is Map) {
       return Map<String, dynamic>.from(result);
@@ -18,6 +22,7 @@ class TaxiCallkitBridge {
 
     return null;
   }
+
   TaxiCallkitBridge();
 
   Future<String?> getPlatformVersion() async {
@@ -59,6 +64,22 @@ class TaxiCallkitBridge {
   }
 
   static Future<void> requestCallPermissions() async {
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      try {
+        final granted = await _iosCompatibilityChannel.invokeMethod<bool>(
+          'requestMicrophonePermission',
+        );
+
+        debugPrint(
+          '[TaxiCallkitBridge] iOS microphone permission granted=$granted',
+        );
+      } catch (error) {
+        debugPrint(
+          '[TaxiCallkitBridge] iOS microphone permission failed: $error',
+        );
+      }
+    }
+
     try {
       await FlutterCallkitIncoming.requestNotificationPermission({
         'title': 'السماح بإشعارات المكالمات',
@@ -92,9 +113,7 @@ class TaxiCallkitBridge {
         ? nativeCallId.trim()
         : nativeIdFromCallId(callId);
 
-    final name = callerName.trim().isEmpty
-        ? 'مكالمة واردة'
-        : callerName.trim();
+    final name = callerName.trim().isEmpty ? 'مكالمة واردة' : callerName.trim();
 
     final params = CallKitParams(
       id: id,
@@ -168,9 +187,8 @@ class TaxiCallkitBridge {
         ? nativeCallId.trim()
         : nativeIdFromCallId(callId);
 
-    final name = receiverName.trim().isEmpty
-        ? 'جاري الاتصال'
-        : receiverName.trim();
+    final name =
+        receiverName.trim().isEmpty ? 'جاري الاتصال' : receiverName.trim();
 
     final params = CallKitParams(
       id: id,
@@ -241,4 +259,3 @@ class TaxiCallkitBridge {
     return FlutterCallkitIncoming.getDevicePushTokenVoIP();
   }
 }
-
