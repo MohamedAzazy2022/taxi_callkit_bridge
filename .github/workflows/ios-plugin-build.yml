@@ -1,0 +1,53 @@
+name: iOS Plugin Build Test
+
+on:
+  push:
+    branches:
+      - ios-native-plugin-v0.0.13
+    paths:
+      - ios/**
+      - lib/**
+      - pubspec.yaml
+      - example/**
+      - .github/workflows/ios-plugin-build.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-plugin-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ios:
+    name: Build iOS example
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Show tool versions
+        run: |
+          flutter --version
+          xcodebuild -version
+          pod --version
+
+      - name: Resolve plugin packages
+        run: flutter pub get
+
+      - name: Resolve example packages
+        working-directory: example
+        run: flutter pub get
+
+      - name: Build iOS without signing
+        working-directory: example
+        run: flutter build ios --debug --no-codesign
