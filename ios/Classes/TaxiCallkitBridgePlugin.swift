@@ -170,11 +170,7 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
   ) {
     switch call.method {
     case "requestMicrophonePermission":
-      AVAudioSession.sharedInstance().requestRecordPermission { granted in
-        DispatchQueue.main.async {
-          result(granted)
-        }
-      }
+      requestMicrophonePermission(result: result)
 
     case "configureVoiceAudioSession":
       result(configureVoiceAudioSession())
@@ -210,6 +206,30 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
     let action = initialVoipAction
     initialVoipAction = nil
     return action
+  }
+
+  private func requestMicrophonePermission(
+    result: @escaping FlutterResult
+  ) {
+    let audioSession = AVAudioSession.sharedInstance()
+
+    switch audioSession.recordPermission {
+    case .granted:
+      result(true)
+
+    case .denied:
+      result(false)
+
+    case .undetermined:
+      audioSession.requestRecordPermission { granted in
+        DispatchQueue.main.async {
+          result(granted)
+        }
+      }
+
+    @unknown default:
+      result(false)
+    }
   }
 
   private func configureVoiceAudioSession() -> Bool {
