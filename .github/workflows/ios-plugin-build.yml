@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - ios-native-plugin-v0.0.13
+      - ios-native-plugin-v0.0.14
     paths:
       - ios/**
       - lib/**

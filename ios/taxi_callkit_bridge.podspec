@@ -4,7 +4,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'taxi_callkit_bridge'
-  s.version          = '0.0.13'
+  s.version          = '0.0.14'
   s.summary          = 'A new Flutter plugin project.'
   s.description      = <<-DESC
 A new Flutter plugin project.

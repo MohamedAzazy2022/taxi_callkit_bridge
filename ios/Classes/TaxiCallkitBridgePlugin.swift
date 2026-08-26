@@ -28,6 +28,7 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
 
   private var voipRegistry: PKPushRegistry?
   private var callProvider: CXProvider?
+  private let callController = CXCallController()
   private var activeCallUUIDByCallId: [String: UUID] = [:]
   private var activeCallDataByUUID: [UUID: [String: Any]] = [:]
 
@@ -169,11 +170,15 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
     result: @escaping FlutterResult
   ) {
     switch call.method {
+    case "getMicrophonePermissionStatus":
+      result(microphonePermissionStatus())
+
     case "requestMicrophonePermission":
       requestMicrophonePermission(result: result)
 
     case "configureVoiceAudioSession":
-      result(configureVoiceAudioSession())
+      let hasCallKitCall = !activeCallDataByUUID.isEmpty
+      result(configureVoiceAudioSession(activate: !hasCallKitCall))
 
     case "isCallKitAudioActive":
       result(callKitAudioSessionActive)
@@ -189,7 +194,8 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
         let arguments = call.arguments as? [String: Any],
         let callId = arguments["callId"] as? String
       {
-        endCall(callId: callId)
+        let remoteEnded = arguments["remoteEnded"] as? Bool ?? false
+        endCall(callId: callId, remoteEnded: remoteEnded)
       }
       result(nil)
 
@@ -208,6 +214,22 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
     return action
   }
 
+  private func microphonePermissionStatus() -> String {
+    switch AVAudioSession.sharedInstance().recordPermission {
+    case .granted:
+      return "granted"
+
+    case .denied:
+      return "denied"
+
+    case .undetermined:
+      return "undetermined"
+
+    @unknown default:
+      return "unknown"
+    }
+  }
+
   private func requestMicrophonePermission(
     result: @escaping FlutterResult
   ) {
@@ -221,6 +243,11 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
       result(false)
 
     case .undetermined:
+      guard UIApplication.shared.applicationState == .active else {
+        result(false)
+        return
+      }
+
       audioSession.requestRecordPermission { granted in
         DispatchQueue.main.async {
           result(granted)
@@ -232,7 +259,7 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
     }
   }
 
-  private func configureVoiceAudioSession() -> Bool {
+  private func configureVoiceAudioSession(activate: Bool) -> Bool {
     let audioSession = AVAudioSession.sharedInstance()
 
     do {
@@ -241,17 +268,9 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
         mode: .voiceChat,
         options: [.allowBluetoothHFP, .defaultToSpeaker]
       )
-      try audioSession.setActive(true)
-
-      callKitAudioSessionActive = true
-
-      compatibilityChannel?.invokeMethod(
-        "iosAudioSessionActivated",
-        arguments: [
-          "active": true,
-          "source": "direct"
-        ]
-      )
+      if activate {
+        try audioSession.setActive(true)
+      }
 
       return true
     } catch {
@@ -358,26 +377,8 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
       key: "receiverUid"
     )
 
-    if UIApplication.shared.applicationState == .active {
-      let foregroundData: [String: Any] = [
-        "callId": callId,
-        "callerName": callerName,
-        "channelName": channelName,
-        "callerUid": callerUid,
-        "receiverUid": receiverUid,
-        "action": "foreground"
-      ]
-
-      compatibilityChannel?.invokeMethod(
-        "iosIncomingCallForeground",
-        arguments: foregroundData
-      )
-
-      completion()
-      return
-    }
-
-    let uuid = UUID()
+    let reusedExistingCall = activeCallUUIDByCallId[callId] != nil
+    let uuid = activeCallUUIDByCallId[callId] ?? UUID()
 
     activeCallUUIDByCallId[callId] = uuid
 
@@ -416,7 +417,9 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
       update: update
     ) { [weak self] error in
       if let error = error {
-        self?.cleanupCall(uuid: uuid)
+        if !reusedExistingCall {
+          self?.cleanupCall(uuid: uuid)
+        }
 
         NSLog(
           "[TaxiCallkitBridge] Failed to report incoming call: \(error)"
@@ -489,6 +492,7 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
   }
 
   public func providerDidReset(_ provider: CXProvider) {
+    callKitAudioSessionActive = false
     activeCallUUIDByCallId.removeAll()
     activeCallDataByUUID.removeAll()
   }
@@ -499,23 +503,11 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
   ) {
     callKitAudioSessionActive = true
 
-    do {
-      try audioSession.setCategory(
-        .playAndRecord,
-        mode: .voiceChat,
-        options: [.allowBluetoothHFP, .defaultToSpeaker]
-      )
-      try audioSession.setActive(true)
-    } catch {
-      NSLog(
-        "[TaxiCallkitBridge] CallKit audio activation failed: \(error)"
-      )
-    }
-
     compatibilityChannel?.invokeMethod(
       "iosAudioSessionActivated",
       arguments: [
-        "active": true
+        "active": true,
+        "source": "callkit"
       ]
     )
   }
@@ -546,6 +538,11 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
 
     var data = callData
     data["action"] = "accept"
+
+    guard configureVoiceAudioSession(activate: false) else {
+      action.fail()
+      return
+    }
 
     initialVoipAction = data
 
@@ -581,18 +578,42 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
     action.fulfill()
   }
 
-  private func endCall(callId: String) {
+  private func endCall(
+    callId: String,
+    remoteEnded: Bool = false
+  ) {
     guard let uuid = activeCallUUIDByCallId[callId] else {
       return
     }
 
-    callProvider?.reportCall(
-      with: uuid,
-      endedAt: Date(),
-      reason: .remoteEnded
-    )
+    if remoteEnded {
+      callProvider?.reportCall(
+        with: uuid,
+        endedAt: Date(),
+        reason: .remoteEnded
+      )
 
-    cleanupCall(uuid: uuid)
+      cleanupCall(uuid: uuid)
+      return
+    }
+
+    let endAction = CXEndCallAction(call: uuid)
+    let transaction = CXTransaction(action: endAction)
+
+    callController.request(transaction) { [weak self] error in
+      guard error != nil else {
+        return
+      }
+
+      DispatchQueue.main.async {
+        self?.callProvider?.reportCall(
+          with: uuid,
+          endedAt: Date(),
+          reason: .failed
+        )
+        self?.cleanupCall(uuid: uuid)
+      }
+    }
   }
 
   private func endAllCalls() {

@@ -1,11 +1,14 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/entities/call_event.dart';
 import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
 import 'package:flutter_callkit_incoming/entities/ios_params.dart';
 import 'package:flutter_callkit_incoming/entities/notification_params.dart';
+
+import 'taxi_callkit_bridge_platform_interface.dart';
 
 class TaxiCallkitBridge {
   static const MethodChannel _channel = MethodChannel('taxi_callkit_bridge');
@@ -23,10 +26,55 @@ class TaxiCallkitBridge {
     return null;
   }
 
+  static Future<String> getIosMicrophonePermissionStatus() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
+      return 'notApplicable';
+    }
+
+    final status = await _iosCompatibilityChannel.invokeMethod<String>(
+      'getMicrophonePermissionStatus',
+    );
+
+    return (status ?? 'unknown').trim().toLowerCase();
+  }
+
+  static Future<bool> requestIosMicrophonePermission() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
+      return true;
+    }
+
+    return await _iosCompatibilityChannel.invokeMethod<bool>(
+          'requestMicrophonePermission',
+        ) ??
+        false;
+  }
+
+  static Future<bool> configureIosVoiceAudioSession() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
+      return true;
+    }
+
+    return await _iosCompatibilityChannel.invokeMethod<bool>(
+          'configureVoiceAudioSession',
+        ) ??
+        false;
+  }
+
+  static Future<bool> isIosCallKitAudioActive() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
+      return false;
+    }
+
+    return await _iosCompatibilityChannel.invokeMethod<bool>(
+          'isCallKitAudioActive',
+        ) ??
+        false;
+  }
+
   TaxiCallkitBridge();
 
-  Future<String?> getPlatformVersion() async {
-    return 'Taxi CallKit Bridge';
+  Future<String?> getPlatformVersion() {
+    return TaxiCallkitBridgePlatform.instance.getPlatformVersion();
   }
 
   static Stream<CallEvent?> get onEvent => FlutterCallkitIncoming.onEvent;
@@ -64,11 +112,17 @@ class TaxiCallkitBridge {
   }
 
   static Future<void> requestCallPermissions() async {
-    if (defaultTargetPlatform == TargetPlatform.iOS) {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
       try {
-        final granted = await _iosCompatibilityChannel.invokeMethod<bool>(
-          'requestMicrophonePermission',
-        );
+        if (WidgetsBinding.instance.lifecycleState !=
+            AppLifecycleState.resumed) {
+          return;
+        }
+
+        final status = await getIosMicrophonePermissionStatus();
+        final granted = status == 'granted' ||
+            (status == 'undetermined' &&
+                await requestIosMicrophonePermission());
 
         debugPrint(
           '[TaxiCallkitBridge] iOS microphone permission granted=$granted',
@@ -78,6 +132,8 @@ class TaxiCallkitBridge {
           '[TaxiCallkitBridge] iOS microphone permission failed: $error',
         );
       }
+
+      return;
     }
 
     try {
@@ -239,7 +295,19 @@ class TaxiCallkitBridge {
   static Future<void> endCall(
     String callId, {
     String? nativeCallId,
+    bool remoteEnded = false,
   }) async {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      await _iosCompatibilityChannel.invokeMethod<void>(
+        'endIosCall',
+        <String, dynamic>{
+          'callId': callId,
+          'remoteEnded': remoteEnded,
+        },
+      );
+      return;
+    }
+
     final id = nativeCallId != null && nativeCallId.trim().isNotEmpty
         ? nativeCallId.trim()
         : nativeIdFromCallId(callId);
@@ -248,6 +316,11 @@ class TaxiCallkitBridge {
   }
 
   static Future<void> endAllCalls() async {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      await _iosCompatibilityChannel.invokeMethod<void>('endAllIosCalls');
+      return;
+    }
+
     await FlutterCallkitIncoming.endAllCalls();
   }
 

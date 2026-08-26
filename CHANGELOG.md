@@ -1,3 +1,11 @@
+## 0.0.14
+
+* Make the plugin the single iOS PushKit and CallKit owner.
+* Route all incoming iOS states through CallKit and deduplicate VoIP pushes.
+* Keep CallKit in control of incoming-call audio activation.
+* Add explicit microphone permission status and lifecycle-safe requests.
+* End local calls with `CXEndCallAction` and distinguish remote endings.
+
 ## 0.0.13
 
 * Move the iOS PushKit and CallKit implementation into the plugin.
