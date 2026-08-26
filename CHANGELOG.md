@@ -5,6 +5,7 @@
 * Keep CallKit in control of incoming-call audio activation.
 * Add explicit microphone permission status and lifecycle-safe requests.
 * End local calls with `CXEndCallAction` and distinguish remote endings.
+* Provide one shared `CallScreenLock` for FlutterFlow actions and widgets.
 
 ## 0.0.13
 

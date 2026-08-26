@@ -332,3 +332,53 @@ class TaxiCallkitBridge {
     return FlutterCallkitIncoming.getDevicePushTokenVoIP();
   }
 }
+
+class CallScreenLock {
+  static final CallScreenLock _instance = CallScreenLock._internal();
+
+  factory CallScreenLock() => _instance;
+
+  CallScreenLock._internal();
+
+  String? _activeOpeningCallId;
+  bool _isNavigatingToCall = false;
+
+  bool shouldOpenCallScreen(String callId) {
+    final normalizedCallId = callId.trim();
+
+    if (normalizedCallId.isEmpty) {
+      debugPrint('[CallScreenLock] Empty callId ignored.');
+      return false;
+    }
+
+    if (_activeOpeningCallId == normalizedCallId || _isNavigatingToCall) {
+      debugPrint(
+        '[CallScreenLock] Duplicate call open ignored: $normalizedCallId',
+      );
+      return false;
+    }
+
+    _activeOpeningCallId = normalizedCallId;
+    _isNavigatingToCall = true;
+    return true;
+  }
+
+  void markNavigationComplete() {
+    _isNavigatingToCall = false;
+  }
+
+  void releaseLockFor(String callId) {
+    if (_activeOpeningCallId != callId.trim()) {
+      return;
+    }
+
+    forceRelease();
+  }
+
+  void forceRelease() {
+    _activeOpeningCallId = null;
+    _isNavigatingToCall = false;
+  }
+
+  String? get activeCallId => _activeOpeningCallId;
+}
