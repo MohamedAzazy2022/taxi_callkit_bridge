@@ -11,9 +11,6 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # Keep the Agora iOS native SDK in this dependency graph so the podspec can
-  # preserve its dynamically looked-up Iris entry point in release builds.
-  agora_rtc_engine: 6.5.4
 
   flutter_callkit_incoming:
     git:

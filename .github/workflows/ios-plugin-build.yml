@@ -43,6 +43,9 @@ jobs:
           xcodebuild -version
           pod --version
 
+      - name: Use CocoaPods for Agora and CallKit plugins
+        run: flutter config --no-enable-swift-package-manager
+
       - name: Resolve plugin packages
         run: flutter pub get
 

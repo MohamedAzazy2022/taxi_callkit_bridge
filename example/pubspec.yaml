@@ -17,6 +17,10 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # The host app owns Agora directly. The example includes it only to verify
+  # the iOS release linker protection contributed by taxi_callkit_bridge.
+  agora_rtc_engine: 6.5.4
+
   taxi_callkit_bridge:
     # When depending on this package from a real application you should use:
     #   taxi_callkit_bridge: ^x.y.z
@@ -47,6 +51,9 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
+  # agora_rtc_engine 6.5.4 and the CallKit plugins use CocoaPods on iOS.
+  config:
+    enable-swift-package-manager: false
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in

@@ -2,6 +2,8 @@
 
 * Preserve Agora's `Iris_InitDartApiDL` symbol in iOS release builds so
   `RtcEngine.initialize()` completes in TestFlight/App Store builds.
+* Keep Agora owned by the host app and verify it through CocoaPods because
+  Agora 6.5.4 is not compatible with Flutter's SwiftPM integration.
 * Verify the symbol in the plugin's release-mode iOS CI build.
 ## 0.0.14
 
