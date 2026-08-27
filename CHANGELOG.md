@@ -1,10 +1,12 @@
 ## 0.0.15
 
-* Preserve Agora's `Iris_InitDartApiDL` symbol in iOS release builds so
-  `RtcEngine.initialize()` completes in TestFlight/App Store builds.
+* Verify that Agora's `Iris_InitDartApiDL` symbol survives normal iOS release
+  linking with the exact Agora 6.5.4 dependency used by the host app.
 * Keep Agora owned by the host app and verify it through CocoaPods because
   Agora 6.5.4 is not compatible with Flutter's SwiftPM integration.
-* Verify the symbol in the plugin's release-mode iOS CI build.
+* Avoid obsolete `AgoraRtcEngine_iOS` force-load paths; Agora 6.5.4 uses
+  `AgoraRtcEngine_Special_iOS` and iris_method_channel directly retains the
+  Dart API entry point.
 ## 0.0.14
 
 * Make the plugin the single iOS PushKit and CallKit owner.

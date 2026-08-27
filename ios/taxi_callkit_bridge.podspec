@@ -18,12 +18,6 @@ A new Flutter plugin project.
   s.dependency 'Flutter'
   s.platform = :ios, '12.0'
 
-  # Agora loads Iris_InitDartApiDL dynamically. Release/App Store linking can
-  # otherwise discard the object that exports it, leaving RtcEngine.initialize
-  # waiting forever. Apply Agora's documented force-load fix to the host app.
-  s.user_target_xcconfig = {
-    'OTHER_LDFLAGS' => '$(inherited) -ObjC -force_load "$(PODS_ROOT)/AgoraRtcEngine_iOS/AgoraRtcKit.xcframework/ios-arm64_armv7/AgoraRtcKit.framework/AgoraRtcKit"'
-  }
 
   # Flutter.framework does not contain a i386 slice.
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386' }
