@@ -1,3 +1,8 @@
+## 0.0.15
+
+* Preserve Agora's `Iris_InitDartApiDL` symbol in iOS release builds so
+  `RtcEngine.initialize()` completes in TestFlight/App Store builds.
+* Verify the symbol in the plugin's release-mode iOS CI build.
 ## 0.0.14
 
 * Make the plugin the single iOS PushKit and CallKit owner.

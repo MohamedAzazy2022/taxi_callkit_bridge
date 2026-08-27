@@ -5,6 +5,7 @@ on:
     branches:
       - ios-native-plugin-v0.0.13
       - ios-native-plugin-v0.0.14
+      - ios-native-plugin-v0.0.15
     paths:
       - ios/**
       - lib/**
@@ -49,6 +50,12 @@ jobs:
         working-directory: example
         run: flutter pub get
 
-      - name: Build iOS without signing
+      - name: Build iOS release without signing
         working-directory: example
-        run: flutter build ios --debug --no-codesign
+        run: flutter build ios --release --no-codesign
+
+      - name: Verify Agora Iris symbol survives release linking
+        run: |
+          APP_BINARY="example/build/ios/iphoneos/Runner.app/Runner"
+          test -f "$APP_BINARY"
+          nm -g "$APP_BINARY" | grep "Iris_InitDartApiDL"
