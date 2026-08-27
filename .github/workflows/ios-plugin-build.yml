@@ -59,6 +59,8 @@ jobs:
 
       - name: Verify Agora Iris symbol survives release linking
         run: |
-          APP_BINARY="example/build/ios/iphoneos/Runner.app/Runner"
-          test -f "$APP_BINARY"
-          nm -g "$APP_BINARY" | grep "Iris_InitDartApiDL"
+          APP_BUNDLE="example/build/ios/iphoneos/Runner.app"
+          IRIS_BINARY="$(find "$APP_BUNDLE" -type f -name iris_method_channel -print -quit)"
+          test -n "$IRIS_BINARY"
+          echo "Iris binary: $IRIS_BINARY"
+          nm -gU "$IRIS_BINARY" | grep "Iris_InitDartApiDL"
