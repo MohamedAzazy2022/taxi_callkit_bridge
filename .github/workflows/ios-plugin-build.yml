@@ -87,6 +87,14 @@ jobs:
           APP_BINARY="example/build/ios/iphoneos/Runner.app/Runner"
           test -f "$APP_BINARY"
           grep "AgoraRtcEngine_Special_iOS (4.5.3.70)" example/ios/Podfile.lock
-          nm -gU "$APP_BINARY" | grep '_OBJC_CLASS_\$_AgoraRtcEngineKit'
+          AGORA_BINARY="$(
+            find example/ios/Pods \
+              -type f \
+              -path '*/AgoraRtcKit.framework/AgoraRtcKit' \
+              -print -quit
+          )"
+          test -n "$AGORA_BINARY"
+          echo "Agora binary: $AGORA_BINARY"
+          nm -gU "$AGORA_BINARY" | grep '_OBJC_CLASS_\$_AgoraRtcEngineKit'
           grep -q "startIosAgoraVoiceCall" ios/Classes/TaxiCallkitBridgePlugin.swift
           grep -q "didActivate audioSession" ios/Classes/TaxiCallkitBridgePlugin.swift
