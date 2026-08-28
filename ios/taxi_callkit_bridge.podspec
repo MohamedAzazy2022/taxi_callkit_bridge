@@ -4,7 +4,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'taxi_callkit_bridge'
-  s.version          = '0.0.15'
+  s.version          = '0.0.16'
   s.summary          = 'A new Flutter plugin project.'
   s.description      = <<-DESC
 A new Flutter plugin project.
@@ -21,6 +21,7 @@ A new Flutter plugin project.
 
   # Flutter.framework does not contain a i386 slice.
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386' }
+  s.user_target_xcconfig = { 'OTHER_LDFLAGS' => '$(inherited) -ObjC' }
   s.swift_version = '5.0'
 
   # If your plugin requires a privacy manifest, for example if it uses any

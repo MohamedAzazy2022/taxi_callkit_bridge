@@ -6,6 +6,7 @@ on:
       - ios-native-plugin-v0.0.13
       - ios-native-plugin-v0.0.14
       - ios-native-plugin-v0.0.15
+      - ios-native-plugin-v0.0.16
     paths:
       - ios/**
       - lib/**
@@ -53,14 +54,35 @@ jobs:
         working-directory: example
         run: flutter pub get
 
+      - name: Match FlutterFlow static CocoaPods linkage
+        run: |
+          ruby <<'RUBY'
+          path = 'example/ios/Podfile'
+          text = File.read(path)
+
+          if text.include?('use_frameworks!')
+            text = text.gsub(
+              /^\s*use_frameworks!.*$/,
+              '  use_frameworks! :linkage => :static'
+            )
+          else
+            marker = "target 'Runner' do\n"
+            abort 'Runner target not found in example Podfile' unless text.include?(marker)
+            text = text.sub(
+              marker,
+              marker + "  use_frameworks! :linkage => :static\n"
+            )
+          end
+
+          File.write(path, text)
+          RUBY
+
       - name: Build iOS release without signing
         working-directory: example
         run: flutter build ios --release --no-codesign
 
-      - name: Verify Agora Iris symbol survives release linking
+      - name: Verify Agora Iris symbol in final static app binary
         run: |
-          APP_BUNDLE="example/build/ios/iphoneos/Runner.app"
-          IRIS_BINARY="$(find "$APP_BUNDLE" -type f -name iris_method_channel -print -quit)"
-          test -n "$IRIS_BINARY"
-          echo "Iris binary: $IRIS_BINARY"
-          nm -gU "$IRIS_BINARY" | grep "Iris_InitDartApiDL"
+          APP_BINARY="example/build/ios/iphoneos/Runner.app/Runner"
+          test -f "$APP_BINARY"
+          nm -gU "$APP_BINARY" | grep "Iris_InitDartApiDL"

@@ -1,3 +1,7 @@
+## 0.0.16
+
+* Retain `Iris_InitDartApiDL` when Agora is linked as a static CocoaPods framework in FlutterFlow iOS Release builds.
+* Verify the Iris symbol in the final static Runner binary.
 ## 0.0.15
 
 * Verify that Agora's `Iris_InitDartApiDL` symbol survives normal iOS release
