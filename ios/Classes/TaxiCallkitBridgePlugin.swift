@@ -3,8 +3,15 @@ import UIKit
 import PushKit
 import CallKit
 import AVFoundation
+import AgoraRtcKit
 
-public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderDelegate, PKPushRegistryDelegate {
+public final class TaxiCallkitBridgePlugin: NSObject,
+  FlutterPlugin,
+  FlutterStreamHandler,
+  CXProviderDelegate,
+  PKPushRegistryDelegate,
+  AgoraRtcEngineDelegate
+{
   private enum IOSNativeOwnerMode: String {
     case auto
     case legacy
@@ -16,6 +23,9 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
 
   private let baseChannel: FlutterMethodChannel
   private var compatibilityChannel: FlutterMethodChannel?
+  private var agoraEventChannel: FlutterEventChannel?
+  private var agoraEventSink: FlutterEventSink?
+  private var lastAgoraEvent: [String: Any]?
 
   private let configuredOwner: IOSNativeOwnerMode
   private let legacyAppDelegateDetected: Bool
@@ -31,6 +41,17 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
   private let callController = CXCallController()
   private var activeCallUUIDByCallId: [String: UUID] = [:]
   private var activeCallDataByUUID: [UUID: [String: Any]] = [:]
+
+  private var agoraEngine: AgoraRtcEngineKit?
+  private var agoraAppId: String?
+  private var agoraCallId: String?
+  private var agoraChannelName: String?
+  private var agoraUserAccount: String?
+  private var agoraJoining = false
+  private var agoraJoined = false
+  private var agoraRemoteUids = Set<UInt>()
+  private var agoraMicrophoneMuted = false
+  private var agoraSpeakerEnabled = true
 
   private init(
     baseChannel: FlutterMethodChannel,
@@ -72,6 +93,7 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
 
     registrar.addMethodCallDelegate(instance, channel: baseChannel)
     instance.registerCompatibilityChannelIfNeeded(messenger: messenger)
+    instance.registerAgoraEventChannel(messenger: messenger)
     instance.startNativeLayerIfNeeded()
 
     NSLog(
@@ -136,6 +158,36 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
     compatibilityChannel = channel
   }
 
+  private func registerAgoraEventChannel(
+    messenger: FlutterBinaryMessenger
+  ) {
+    let channel = FlutterEventChannel(
+      name: "taxi_ios_agora_events",
+      binaryMessenger: messenger
+    )
+
+    channel.setStreamHandler(self)
+    agoraEventChannel = channel
+  }
+
+  public func onListen(
+    withArguments arguments: Any?,
+    eventSink events: @escaping FlutterEventSink
+  ) -> FlutterError? {
+    agoraEventSink = events
+
+    if let event = lastAgoraEvent {
+      events(event)
+    }
+
+    return nil
+  }
+
+  public func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    agoraEventSink = nil
+    return nil
+  }
+
   private func startNativeLayerIfNeeded() {
     guard pluginOwnsNativeLayer else {
       nativeLayerStarted = false
@@ -178,7 +230,11 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
 
     case "configureVoiceAudioSession":
       let hasCallKitCall = !activeCallDataByUUID.isEmpty
-      result(configureVoiceAudioSession(activate: !hasCallKitCall))
+      result(
+        configureVoiceAudioSession(
+          activate: !hasCallKitCall || callKitAudioSessionActive
+        )
+      )
 
     case "isCallKitAudioActive":
       result(callKitAudioSessionActive)
@@ -197,11 +253,44 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
         let remoteEnded = arguments["remoteEnded"] as? Bool ?? false
         endCall(callId: callId, remoteEnded: remoteEnded)
       }
+      leaveAgoraVoiceCall(reason: "call_ended")
       result(nil)
 
     case "endAllIosCalls":
       endAllCalls()
+      leaveAgoraVoiceCall(reason: "all_calls_ended")
       result(nil)
+
+    case "startIosAgoraVoiceCall":
+      startAgoraVoiceCall(
+        arguments: call.arguments,
+        result: result
+      )
+
+    case "leaveIosAgoraVoiceCall":
+      leaveAgoraVoiceCall(reason: "flutter_leave")
+      result(agoraState())
+
+    case "setIosAgoraMicrophoneMuted":
+      setAgoraMicrophoneMuted(
+        arguments: call.arguments,
+        result: result
+      )
+
+    case "setIosAgoraSpeakerEnabled":
+      setAgoraSpeakerEnabled(
+        arguments: call.arguments,
+        result: result
+      )
+
+    case "renewIosAgoraToken":
+      renewAgoraToken(
+        arguments: call.arguments,
+        result: result
+      )
+
+    case "getIosAgoraVoiceState":
+      result(agoraState())
 
     default:
       result(FlutterMethodNotImplemented)
@@ -261,13 +350,19 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
 
   private func configureVoiceAudioSession(activate: Bool) -> Bool {
     let audioSession = AVAudioSession.sharedInstance()
+    var options: AVAudioSession.CategoryOptions = [.allowBluetoothHFP]
+
+    if agoraSpeakerEnabled {
+      options.insert(.defaultToSpeaker)
+    }
 
     do {
       try audioSession.setCategory(
         .playAndRecord,
         mode: .voiceChat,
-        options: [.allowBluetoothHFP, .defaultToSpeaker]
+        options: options
       )
+
       if activate {
         try audioSession.setActive(true)
       }
@@ -278,6 +373,354 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
         "[TaxiCallkitBridge] Failed to configure voice audio session: \(error)"
       )
       return false
+    }
+  }
+
+  private func startAgoraVoiceCall(
+    arguments: Any?,
+    result: @escaping FlutterResult
+  ) {
+    guard pluginOwnsNativeLayer else {
+      result(
+        FlutterError(
+          code: "ios_native_owner_disabled",
+          message: "The plugin does not own the iOS native call layer.",
+          details: nil
+        )
+      )
+      return
+    }
+
+    guard let values = arguments as? [String: Any] else {
+      result(invalidAgoraArguments("Arguments are required."))
+      return
+    }
+
+    let appId = normalizedString(values["appId"])
+    let token = normalizedString(values["token"])
+    let channelName = normalizedString(values["channelName"])
+    let userAccount = normalizedString(values["userAccount"])
+    let callId = normalizedString(values["callId"])
+
+    guard !appId.isEmpty else {
+      result(invalidAgoraArguments("appId is required."))
+      return
+    }
+
+    guard !token.isEmpty else {
+      result(invalidAgoraArguments("token is required."))
+      return
+    }
+
+    guard !channelName.isEmpty else {
+      result(invalidAgoraArguments("channelName is required."))
+      return
+    }
+
+    guard !userAccount.isEmpty else {
+      result(invalidAgoraArguments("userAccount is required."))
+      return
+    }
+
+    if
+      (agoraJoining || agoraJoined),
+      agoraCallId == callId,
+      agoraChannelName == channelName,
+      agoraUserAccount == userAccount
+    {
+      result(agoraState())
+      return
+    }
+
+    if agoraJoining || agoraJoined {
+      result(
+        FlutterError(
+          code: "ios_agora_busy",
+          message: "Another iOS Agora call is already active.",
+          details: agoraState()
+        )
+      )
+      return
+    }
+
+    guard microphonePermissionStatus() == "granted" else {
+      result(
+        FlutterError(
+          code: "microphone_permission_required",
+          message: "Microphone permission is required before joining Agora.",
+          details: [
+            "permissionStatus": microphonePermissionStatus()
+          ]
+        )
+      )
+      return
+    }
+
+    emitAgoraEvent(
+      "initializing",
+      extra: [
+        "callId": callId,
+        "channelName": channelName
+      ]
+    )
+
+    if agoraEngine != nil && agoraAppId != appId {
+      AgoraRtcEngineKit.destroy()
+      agoraEngine = nil
+      agoraAppId = nil
+    }
+
+    let engine: AgoraRtcEngineKit
+
+    if let currentEngine = agoraEngine {
+      engine = currentEngine
+      engine.delegate = self
+    } else {
+      engine = AgoraRtcEngineKit.sharedEngine(
+        withAppId: appId,
+        delegate: self
+      )
+      agoraEngine = engine
+      agoraAppId = appId
+    }
+
+    engine.setAudioSessionOperationRestriction(.all)
+
+    let shouldActivateAudio =
+      activeCallDataByUUID.isEmpty ||
+      callKitAudioSessionActive
+
+    guard configureVoiceAudioSession(activate: shouldActivateAudio) else {
+      result(
+        FlutterError(
+          code: "ios_audio_session_failed",
+          message: "Failed to configure the iOS voice audio session.",
+          details: nil
+        )
+      )
+      return
+    }
+
+    engine.enableAudio()
+    engine.disableVideo()
+    engine.enableLocalAudio(true)
+    engine.muteLocalAudioStream(agoraMicrophoneMuted)
+    engine.setDefaultAudioRouteToSpeakerphone(agoraSpeakerEnabled)
+    engine.setEnableSpeakerphone(agoraSpeakerEnabled)
+
+    let mediaOptions = AgoraRtcChannelMediaOptions()
+    mediaOptions.channelProfile = .communication
+    mediaOptions.clientRoleType = .broadcaster
+    mediaOptions.publishMicrophoneTrack = true
+    mediaOptions.publishCameraTrack = false
+    mediaOptions.autoSubscribeAudio = true
+    mediaOptions.autoSubscribeVideo = false
+
+    agoraCallId = callId
+    agoraChannelName = channelName
+    agoraUserAccount = userAccount
+    agoraJoining = true
+    agoraJoined = false
+    agoraRemoteUids.removeAll()
+
+    emitAgoraEvent("joining")
+
+    let joinCode = engine.joinChannel(
+      byToken: token,
+      channelId: channelName,
+      userAccount: userAccount,
+      mediaOptions: mediaOptions,
+      joinSuccess: nil
+    )
+
+    guard joinCode == 0 else {
+      agoraJoining = false
+      emitAgoraEvent(
+        "error",
+        extra: [
+          "code": Int(joinCode),
+          "operation": "joinChannel"
+        ]
+      )
+
+      result(
+        FlutterError(
+          code: "ios_agora_join_rejected",
+          message: "Agora rejected the iOS join request.",
+          details: [
+            "nativeCode": Int(joinCode),
+            "state": agoraState()
+          ]
+        )
+      )
+      return
+    }
+
+    result(agoraState())
+  }
+
+  private func invalidAgoraArguments(_ message: String) -> FlutterError {
+    return FlutterError(
+      code: "invalid_ios_agora_arguments",
+      message: message,
+      details: nil
+    )
+  }
+
+  private func normalizedString(_ value: Any?) -> String {
+    guard let value = value else {
+      return ""
+    }
+
+    return "\(value)".trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private func setAgoraMicrophoneMuted(
+    arguments: Any?,
+    result: @escaping FlutterResult
+  ) {
+    guard
+      let values = arguments as? [String: Any],
+      let muted = values["muted"] as? Bool
+    else {
+      result(invalidAgoraArguments("muted is required."))
+      return
+    }
+
+    agoraMicrophoneMuted = muted
+
+    guard let engine = agoraEngine else {
+      result(false)
+      return
+    }
+
+    let code = engine.muteLocalAudioStream(muted)
+    let succeeded = code == 0
+
+    if succeeded {
+      emitAgoraEvent(
+        "microphoneChanged",
+        extra: ["muted": muted]
+      )
+    }
+
+    result(succeeded)
+  }
+
+  private func setAgoraSpeakerEnabled(
+    arguments: Any?,
+    result: @escaping FlutterResult
+  ) {
+    guard
+      let values = arguments as? [String: Any],
+      let enabled = values["enabled"] as? Bool
+    else {
+      result(invalidAgoraArguments("enabled is required."))
+      return
+    }
+
+    let previousValue = agoraSpeakerEnabled
+    agoraSpeakerEnabled = enabled
+
+    let shouldActivateAudio =
+      activeCallDataByUUID.isEmpty ||
+      callKitAudioSessionActive
+
+    guard configureVoiceAudioSession(activate: shouldActivateAudio) else {
+      agoraSpeakerEnabled = previousValue
+      result(false)
+      return
+    }
+
+    if let engine = agoraEngine {
+      engine.setDefaultAudioRouteToSpeakerphone(enabled)
+      engine.setEnableSpeakerphone(enabled)
+    }
+
+    emitAgoraEvent(
+      "speakerChanged",
+      extra: ["enabled": enabled]
+    )
+    result(true)
+  }
+
+  private func renewAgoraToken(
+    arguments: Any?,
+    result: @escaping FlutterResult
+  ) {
+    guard
+      let values = arguments as? [String: Any],
+      !normalizedString(values["token"]).isEmpty
+    else {
+      result(invalidAgoraArguments("token is required."))
+      return
+    }
+
+    guard let engine = agoraEngine else {
+      result(false)
+      return
+    }
+
+    let code = engine.renewToken(normalizedString(values["token"]))
+    result(code == 0)
+  }
+
+  private func leaveAgoraVoiceCall(reason: String) {
+    let previousCallId = agoraCallId ?? ""
+    let previousChannelName = agoraChannelName ?? ""
+
+    if let engine = agoraEngine, agoraJoining || agoraJoined {
+      engine.leaveChannel(nil)
+    }
+
+    agoraJoining = false
+    agoraJoined = false
+    agoraCallId = nil
+    agoraChannelName = nil
+    agoraUserAccount = nil
+    agoraRemoteUids.removeAll()
+
+    emitAgoraEvent(
+      "left",
+      extra: [
+        "callId": previousCallId,
+        "channelName": previousChannelName,
+        "reason": reason
+      ]
+    )
+  }
+
+  private func agoraState() -> [String: Any] {
+    return [
+      "native": true,
+      "callId": agoraCallId ?? "",
+      "channelName": agoraChannelName ?? "",
+      "userAccount": agoraUserAccount ?? "",
+      "joining": agoraJoining,
+      "joined": agoraJoined,
+      "remoteUserCount": agoraRemoteUids.count,
+      "microphoneMuted": agoraMicrophoneMuted,
+      "speakerEnabled": agoraSpeakerEnabled,
+      "callKitAudioActive": callKitAudioSessionActive
+    ]
+  }
+
+  private func emitAgoraEvent(
+    _ name: String,
+    extra: [String: Any] = [:]
+  ) {
+    var event = agoraState()
+    event["event"] = name
+    event["timestampMs"] = Int64(Date().timeIntervalSince1970 * 1000)
+
+    for (key, value) in extra {
+      event[key] = value
+    }
+
+    lastAgoraEvent = event
+
+    DispatchQueue.main.async { [weak self] in
+      self?.agoraEventSink?(event)
     }
   }
 
@@ -380,8 +823,6 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
     let reusedExistingCall = activeCallUUIDByCallId[callId] != nil
     let uuid = activeCallUUIDByCallId[callId] ?? UUID()
 
-    activeCallUUIDByCallId[callId] = uuid
-
     let callData: [String: Any] = [
       "callId": callId,
       "callerName": callerName,
@@ -390,6 +831,17 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
       "receiverUid": receiverUid,
       "nativeCallId": uuid.uuidString
     ]
+
+    if UIApplication.shared.applicationState == .active {
+      compatibilityChannel?.invokeMethod(
+        "iosIncomingCallForeground",
+        arguments: callData
+      )
+      completion()
+      return
+    }
+
+    activeCallUUIDByCallId[callId] = uuid
 
     activeCallDataByUUID[uuid] = callData
 
@@ -495,20 +947,35 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
     callKitAudioSessionActive = false
     activeCallUUIDByCallId.removeAll()
     activeCallDataByUUID.removeAll()
+    leaveAgoraVoiceCall(reason: "callkit_reset")
   }
 
   public func provider(
     _ provider: CXProvider,
     didActivate audioSession: AVAudioSession
   ) {
-    callKitAudioSessionActive = true
+    let configured = configureVoiceAudioSession(activate: true)
+    callKitAudioSessionActive = configured
+
+    if configured, let engine = agoraEngine {
+      engine.enableAudio()
+      engine.enableLocalAudio(true)
+      engine.muteLocalAudioStream(agoraMicrophoneMuted)
+      engine.setDefaultAudioRouteToSpeakerphone(agoraSpeakerEnabled)
+      engine.setEnableSpeakerphone(agoraSpeakerEnabled)
+    }
 
     compatibilityChannel?.invokeMethod(
       "iosAudioSessionActivated",
       arguments: [
-        "active": true,
+        "active": configured,
         "source": "callkit"
       ]
+    )
+
+    emitAgoraEvent(
+      "audioSessionActivated",
+      extra: ["configured": configured]
     )
   }
 
@@ -517,6 +984,7 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
     didDeactivate audioSession: AVAudioSession
   ) {
     callKitAudioSessionActive = false
+    agoraEngine?.muteLocalAudioStream(true)
 
     compatibilityChannel?.invokeMethod(
       "iosAudioSessionDeactivated",
@@ -524,6 +992,8 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
         "active": false
       ]
     )
+
+    emitAgoraEvent("audioSessionDeactivated")
   }
 
   public func provider(
@@ -574,6 +1044,7 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
       arguments: data
     )
 
+    leaveAgoraVoiceCall(reason: "callkit_end")
     cleanupCall(uuid: uuid)
     action.fulfill()
   }
@@ -639,6 +1110,99 @@ public final class TaxiCallkitBridgePlugin: NSObject, FlutterPlugin, CXProviderD
     }
 
     activeCallDataByUUID.removeValue(forKey: uuid)
+  }
+
+  public func rtcEngine(
+    _ engine: AgoraRtcEngineKit,
+    didJoinChannel channel: String,
+    withUid uid: UInt,
+    elapsed: Int
+  ) {
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else {
+        return
+      }
+
+      self.agoraJoining = false
+      self.agoraJoined = true
+
+      self.emitAgoraEvent(
+        "joined",
+        extra: [
+          "channelName": channel,
+          "localUid": Int64(uid),
+          "elapsedMs": elapsed
+        ]
+      )
+    }
+  }
+
+  public func rtcEngine(
+    _ engine: AgoraRtcEngineKit,
+    didJoinedOfUid uid: UInt,
+    elapsed: Int
+  ) {
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else {
+        return
+      }
+
+      self.agoraRemoteUids.insert(uid)
+
+      self.emitAgoraEvent(
+        "remoteJoined",
+        extra: [
+          "remoteUid": Int64(uid),
+          "elapsedMs": elapsed
+        ]
+      )
+    }
+  }
+
+  public func rtcEngine(
+    _ engine: AgoraRtcEngineKit,
+    didOfflineOfUid uid: UInt,
+    reason: AgoraUserOfflineReason
+  ) {
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else {
+        return
+      }
+
+      self.agoraRemoteUids.remove(uid)
+
+      self.emitAgoraEvent(
+        "remoteOffline",
+        extra: [
+          "remoteUid": Int64(uid),
+          "reason": reason.rawValue
+        ]
+      )
+    }
+  }
+
+  public func rtcEngine(
+    _ engine: AgoraRtcEngineKit,
+    didOccurError errorCode: AgoraErrorCode
+  ) {
+    DispatchQueue.main.async { [weak self] in
+      self?.emitAgoraEvent(
+        "error",
+        extra: [
+          "code": errorCode.rawValue,
+          "operation": "agoraDelegate"
+        ]
+      )
+    }
+  }
+
+  public func rtcEngine(
+    _ engine: AgoraRtcEngineKit,
+    tokenPrivilegeWillExpire token: String
+  ) {
+    DispatchQueue.main.async { [weak self] in
+      self?.emitAgoraEvent("tokenWillExpire")
+    }
   }
 
   private static func readConfiguredOwner() -> IOSNativeOwnerMode {

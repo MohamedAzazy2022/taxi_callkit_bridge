@@ -7,6 +7,7 @@ on:
       - ios-native-plugin-v0.0.14
       - ios-native-plugin-v0.0.15
       - ios-native-plugin-v0.0.16
+      - ios-native-plugin-v0.0.17
     paths:
       - ios/**
       - lib/**
@@ -81,8 +82,11 @@ jobs:
         working-directory: example
         run: flutter build ios --release --no-codesign
 
-      - name: Verify Agora Iris symbol in final static app binary
+      - name: Verify native Agora bridge and exact RTC SDK
         run: |
           APP_BINARY="example/build/ios/iphoneos/Runner.app/Runner"
           test -f "$APP_BINARY"
-          nm -gU "$APP_BINARY" | grep "Iris_InitDartApiDL"
+          grep "AgoraRtcEngine_Special_iOS (4.5.3.70)" example/ios/Podfile.lock
+          nm -gU "$APP_BINARY" | grep '_OBJC_CLASS_\$_AgoraRtcEngineKit'
+          grep -q "startIosAgoraVoiceCall" ios/Classes/TaxiCallkitBridgePlugin.swift
+          grep -q "didActivate audioSession" ios/Classes/TaxiCallkitBridgePlugin.swift

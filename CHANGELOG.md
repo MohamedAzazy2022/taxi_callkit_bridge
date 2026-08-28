@@ -1,7 +1,22 @@
+## 0.0.17
+
+* Restore the proven iOS voice audio session lifecycle: `.playAndRecord`,
+  `.voiceChat`, Bluetooth HFP, speaker routing, and explicit activation from
+  `CXProviderDelegate.provider(_:didActivate:)`.
+* Run Agora voice calls through the native iOS RTC SDK instead of the Flutter
+  Iris bridge, while Android continues to use the host app's Flutter Agora SDK.
+* Preserve the complete `taxi_ios_voip_callkit` method and event contract.
+* Add idempotent native join/leave, mute, speaker, token renewal, and a dedicated
+  `taxi_ios_agora_events` stream for FlutterFlow call UI state.
+* Remove the ineffective Iris symbol-retainer workaround.
+
 ## 0.0.16
 
-* Retain `Iris_InitDartApiDL` when Agora is linked as a static CocoaPods framework in FlutterFlow iOS Release builds.
-* Verify the Iris symbol in the final static Runner binary.
+* Retain `Iris_InitDartApiDL` when Agora is linked as a static CocoaPods
+  framework in FlutterFlow iOS Release builds.
+* Make the release-link CI check validate the final binary that owns the Iris
+  symbol instead of assuming a separately embedded dynamic framework.
+
 ## 0.0.15
 
 * Verify that Agora's `Iris_InitDartApiDL` symbol survives normal iOS release
@@ -11,6 +26,7 @@
 * Avoid obsolete `AgoraRtcEngine_iOS` force-load paths; Agora 6.5.4 uses
   `AgoraRtcEngine_Special_iOS` and iris_method_channel directly retains the
   Dart API entry point.
+
 ## 0.0.14
 
 * Make the plugin the single iOS PushKit and CallKit owner.

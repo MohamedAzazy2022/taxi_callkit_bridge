@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -14,6 +16,23 @@ class TaxiCallkitBridge {
   static const MethodChannel _channel = MethodChannel('taxi_callkit_bridge');
   static const MethodChannel _iosCompatibilityChannel =
       MethodChannel('taxi_ios_voip_callkit');
+  static const EventChannel _iosAgoraEventChannel =
+      EventChannel('taxi_ios_agora_events');
+
+  static Stream<Map<String, dynamic>>? _cachedIosAgoraEvents;
+
+  static Stream<Map<String, dynamic>> get iosAgoraEvents {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
+      return const Stream<Map<String, dynamic>>.empty();
+    }
+
+    return _cachedIosAgoraEvents ??= _iosAgoraEventChannel
+        .receiveBroadcastStream()
+        .where((dynamic event) => event is Map)
+        .map(
+          (dynamic event) => Map<String, dynamic>.from(event as Map),
+        );
+  }
 
   static Future<Map<String, dynamic>?> getInitialNativeCallAction() async {
     final result =
@@ -69,6 +88,109 @@ class TaxiCallkitBridge {
           'isCallKitAudioActive',
         ) ??
         false;
+  }
+
+  static Future<Map<String, dynamic>> startIosAgoraVoiceCall({
+    required String appId,
+    required String token,
+    required String channelName,
+    required String userAccount,
+    required String callId,
+  }) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
+      return <String, dynamic>{
+        'native': false,
+        'joining': false,
+        'joined': false,
+      };
+    }
+
+    final result = await _iosCompatibilityChannel.invokeMethod<dynamic>(
+      'startIosAgoraVoiceCall',
+      <String, dynamic>{
+        'appId': appId,
+        'token': token,
+        'channelName': channelName,
+        'userAccount': userAccount,
+        'callId': callId,
+      },
+    );
+
+    return result is Map
+        ? Map<String, dynamic>.from(result)
+        : <String, dynamic>{};
+  }
+
+  static Future<Map<String, dynamic>> leaveIosAgoraVoiceCall() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
+      return <String, dynamic>{
+        'native': false,
+        'joining': false,
+        'joined': false,
+      };
+    }
+
+    final result = await _iosCompatibilityChannel.invokeMethod<dynamic>(
+      'leaveIosAgoraVoiceCall',
+    );
+
+    return result is Map
+        ? Map<String, dynamic>.from(result)
+        : <String, dynamic>{};
+  }
+
+  static Future<bool> setIosAgoraMicrophoneMuted(bool muted) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
+      return false;
+    }
+
+    return await _iosCompatibilityChannel.invokeMethod<bool>(
+          'setIosAgoraMicrophoneMuted',
+          <String, dynamic>{'muted': muted},
+        ) ??
+        false;
+  }
+
+  static Future<bool> setIosAgoraSpeakerEnabled(bool enabled) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
+      return false;
+    }
+
+    return await _iosCompatibilityChannel.invokeMethod<bool>(
+          'setIosAgoraSpeakerEnabled',
+          <String, dynamic>{'enabled': enabled},
+        ) ??
+        false;
+  }
+
+  static Future<bool> renewIosAgoraToken(String token) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
+      return false;
+    }
+
+    return await _iosCompatibilityChannel.invokeMethod<bool>(
+          'renewIosAgoraToken',
+          <String, dynamic>{'token': token},
+        ) ??
+        false;
+  }
+
+  static Future<Map<String, dynamic>> getIosAgoraVoiceState() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
+      return <String, dynamic>{
+        'native': false,
+        'joining': false,
+        'joined': false,
+      };
+    }
+
+    final result = await _iosCompatibilityChannel.invokeMethod<dynamic>(
+      'getIosAgoraVoiceState',
+    );
+
+    return result is Map
+        ? Map<String, dynamic>.from(result)
+        : <String, dynamic>{};
   }
 
   TaxiCallkitBridge();
@@ -329,6 +451,10 @@ class TaxiCallkitBridge {
   }
 
   static Future<dynamic> getVoipToken() async {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      return _iosCompatibilityChannel.invokeMethod<String>('getVoipToken');
+    }
+
     return FlutterCallkitIncoming.getDevicePushTokenVoIP();
   }
 }
