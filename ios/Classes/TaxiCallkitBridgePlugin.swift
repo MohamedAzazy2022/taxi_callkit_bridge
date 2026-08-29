@@ -832,15 +832,8 @@ public final class TaxiCallkitBridgePlugin: NSObject,
       "nativeCallId": uuid.uuidString
     ]
 
-    if UIApplication.shared.applicationState == .active {
-      compatibilityChannel?.invokeMethod(
-        "iosIncomingCallForeground",
-        arguments: callData
-      )
-      completion()
-      return
-    }
-
+    // Every VoIP push must be reported to CallKit in every app state.
+    // Skipping CallKit can cause iOS to stop delivering later VoIP pushes.
     activeCallUUIDByCallId[callId] = uuid
 
     activeCallDataByUUID[uuid] = callData
