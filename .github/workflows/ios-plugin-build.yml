@@ -8,6 +8,7 @@ on:
       - ios-native-plugin-v0.0.15
       - ios-native-plugin-v0.0.16
       - ios-native-plugin-v0.0.17
+      - android-plugin-owned-fcm-v0.0.19
     paths:
       - ios/**
       - lib/**
@@ -24,6 +25,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  build-android:
+    name: Build Android example
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve plugin packages
+        run: flutter pub get
+
+      - name: Analyze and test plugin
+        run: |
+          flutter analyze
+          flutter test
+
+      - name: Build Android debug APK
+        working-directory: example
+        run: flutter build apk --debug
+
   build-ios:
     name: Build iOS example
     runs-on: macos-latest

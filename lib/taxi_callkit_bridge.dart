@@ -1,5 +1,9 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -20,6 +24,24 @@ class TaxiCallkitBridge {
       EventChannel('taxi_ios_agora_events');
 
   static Stream<Map<String, dynamic>>? _cachedIosAgoraEvents;
+  static bool _androidCallPushHandlerRegistered = false;
+
+  /// Registers the package-owned Android FCM handler without requiring the
+  /// host application's main.dart to be edited.
+  static Future<void> initializeAndroidCallPushHandling() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      return;
+    }
+
+    if (_androidCallPushHandlerRegistered) {
+      return;
+    }
+
+    FirebaseMessaging.onBackgroundMessage(
+      taxiAndroidCallPushBackgroundHandler,
+    );
+    _androidCallPushHandlerRegistered = true;
+  }
 
   static Stream<Map<String, dynamic>> get iosAgoraEvents {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
@@ -35,6 +57,8 @@ class TaxiCallkitBridge {
   }
 
   static Future<Map<String, dynamic>?> getInitialNativeCallAction() async {
+    await initializeAndroidCallPushHandling();
+
     final result =
         await _channel.invokeMethod<dynamic>('getInitialNativeCallAction');
 
@@ -258,6 +282,8 @@ class TaxiCallkitBridge {
       return;
     }
 
+    await initializeAndroidCallPushHandling();
+
     try {
       await FlutterCallkitIncoming.requestNotificationPermission({
         'title': 'السماح بإشعارات المكالمات',
@@ -456,6 +482,157 @@ class TaxiCallkitBridge {
     }
 
     return FlutterCallkitIncoming.getDevicePushTokenVoIP();
+  }
+
+  static Future<void> handleAndroidCallPushData(
+    Map<String, dynamic> data, {
+    DateTime? sentTime,
+  }) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      return;
+    }
+
+    final type = (data['type'] ?? '').toString().trim().toLowerCase();
+    final callId = (data['callId'] ?? '').toString().trim();
+
+    if (callId.isEmpty) {
+      return;
+    }
+
+    const terminalTypes = <String>{
+      'agora_call_end',
+      'agora_call_ended',
+      'agora_call_cancel',
+      'agora_call_declined',
+      'agora_call_missed',
+    };
+
+    if (terminalTypes.contains(type)) {
+      try {
+        await endCall(callId, remoteEnded: true);
+      } catch (_) {}
+      return;
+    }
+
+    if (type != 'agora_call') {
+      return;
+    }
+
+    if (sentTime != null &&
+        DateTime.now().difference(sentTime).inSeconds > 75) {
+      return;
+    }
+
+    final currentUid = FirebaseAuth.instance.currentUser?.uid.trim() ?? '';
+    if (currentUid.isEmpty) {
+      return;
+    }
+
+    final payloadReceiverUid = (data['receiverUid'] ?? '').toString().trim();
+    if (payloadReceiverUid.isNotEmpty && payloadReceiverUid != currentUid) {
+      return;
+    }
+
+    final callSnapshot = await FirebaseFirestore.instance
+        .collection('agoraCalls')
+        .doc(callId)
+        .get(const GetOptions(source: Source.server))
+        .timeout(const Duration(seconds: 8));
+
+    if (!callSnapshot.exists) {
+      return;
+    }
+
+    final callData = callSnapshot.data() ?? <String, dynamic>{};
+    final status = (callData['status'] ?? '').toString().trim();
+    if (status != 'ringing') {
+      await endCall(callId, remoteEnded: true);
+      return;
+    }
+
+    final receiverRef = callData['receiverRef'];
+    final documentReceiverUid =
+        (callData['receiverUid'] ?? '').toString().trim();
+    final receiverMatches =
+        receiverRef is DocumentReference && receiverRef.id == currentUid;
+    if (!receiverMatches && documentReceiverUid != currentUid) {
+      return;
+    }
+
+    final createdAt = callData['createdAt'];
+    if (createdAt is Timestamp &&
+        DateTime.now().difference(createdAt.toDate()).inSeconds > 75) {
+      await endCall(callId, remoteEnded: true);
+      return;
+    }
+
+    try {
+      final calls = await activeCalls();
+      if (_containsAndroidCall(calls, callId)) {
+        return;
+      }
+    } catch (_) {}
+
+    await showIncomingCall(
+      callId: callId,
+      callerName: (data['callerName'] ?? 'مكالمة واردة').toString(),
+      channelName: (data['channelName'] ?? '').toString(),
+      callerUid: (data['callerUid'] ?? '').toString(),
+      receiverUid: currentUid,
+    );
+  }
+
+  static bool _containsAndroidCall(dynamic value, String callId) {
+    if (value is Map) {
+      if ((value['callId'] ?? '').toString().trim() == callId) {
+        return true;
+      }
+
+      final extra = value['extra'];
+      if (extra is Map && (extra['callId'] ?? '').toString().trim() == callId) {
+        return true;
+      }
+
+      return value.values.any(
+        (dynamic nested) => _containsAndroidCall(nested, callId),
+      );
+    }
+
+    if (value is Iterable) {
+      return value.any(
+        (dynamic item) => _containsAndroidCall(item, callId),
+      );
+    }
+
+    return false;
+  }
+}
+
+@pragma('vm:entry-point')
+Future<void> taxiAndroidCallPushBackgroundHandler(
+  RemoteMessage message,
+) async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+    return;
+  }
+
+  try {
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp();
+    }
+  } catch (_) {}
+
+  try {
+    await TaxiCallkitBridge.handleAndroidCallPushData(
+      message.data,
+      sentTime: message.sentTime,
+    );
+  } catch (error) {
+    debugPrint(
+      '[TaxiCallkitBridge] Android background call push failed: $error',
+    );
   }
 }
 

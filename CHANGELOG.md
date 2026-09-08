@@ -1,3 +1,9 @@
+## 0.0.19
+
+- Register the Android data-only FCM call handler from the package, so the host
+  FlutterFlow application does not need a custom main.dart.
+- Show and end Android native call UI from high-priority call push payloads.
+- Keep every existing native iOS Agora, PushKit, CallKit, and audio API intact.
 ## 0.0.17
 
 * Restore the proven iOS voice audio session lifecycle: `.playAndRecord`,
