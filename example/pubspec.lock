@@ -90,8 +90,8 @@ packages:
     dependency: transitive
     description:
       path: "."
-      ref: "v2.5.8-taxi.7"
-      resolved-ref: "637ebdf74d63b6a1e00af7be85b93b0ced9e72e6"
+      ref: "2555ca1c9ae200754192c6197c70b57b04df328d"
+      resolved-ref: "2555ca1c9ae200754192c6197c70b57b04df328d"
       url: "https://github.com/MohamedAzazy2022/taxi_flutter_callkit_incoming.git"
     source: git
     version: "2.5.8"
@@ -291,7 +291,7 @@ packages:
       path: ".."
       relative: true
     source: path
-    version: "0.0.17"
+    version: "0.0.18"
   term_glyph:
     dependency: transitive
     description:

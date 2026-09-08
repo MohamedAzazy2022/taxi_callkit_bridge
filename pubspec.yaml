@@ -1,8 +1,7 @@
 name: taxi_callkit_bridge
 description: Taxi native CallKit bridge.
 publish_to: none
-version: 0.0.17
-
+version: 0.0.18
 environment:
   sdk: '>=3.0.0 <4.0.0'
   flutter: '>=3.3.0'
@@ -14,8 +13,7 @@ dependencies:
   flutter_callkit_incoming:
     git:
       url: https://github.com/MohamedAzazy2022/taxi_flutter_callkit_incoming.git
-      ref: v2.5.8-taxi.7
-
+      ref: 2555ca1c9ae200754192c6197c70b57b04df328d
   plugin_platform_interface: ^2.0.2
 
 dev_dependencies:
