@@ -31,6 +31,13 @@ class TaxiCallkitBridgePlugin: FlutterPlugin, MethodCallHandler {
 
   override fun onMethodCall(call: MethodCall, result: Result) {
     when (call.method) {
+      "canPlayGalal1NotificationSound" -> {
+        try {
+          result.success(Galal1NotificationChannels.canPlaySound(appContext, call.argument<String>("channelId")))
+        } catch (error: RuntimeException) {
+          result.error("notification_sound_settings", error.message, null)
+        }
+      }
       "getGalal1ForceStopWindowStart" -> {
         try {
           result.success(Galal1ForceStop.windowStart(appContext))

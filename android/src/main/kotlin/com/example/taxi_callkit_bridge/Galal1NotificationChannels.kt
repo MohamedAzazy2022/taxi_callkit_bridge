@@ -4,6 +4,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 
@@ -22,6 +23,23 @@ internal object Galal1NotificationChannels {
     "general" to "الإشعارات العامة",
     "original_extra" to "الإشعارات الصوتية الإضافية",
   )
+
+  fun canPlaySound(context: Context, id: String?): Boolean {
+    if (context.packageName != applicationId || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+    if (id == null || names.keys.none { id == "galal1_${it}_v1" }) return false
+    val manager = context.getSystemService(NotificationManager::class.java)
+    val channel = manager.getNotificationChannel(id) ?: return false
+    if (!manager.areNotificationsEnabled() ||
+      channel.importance < NotificationManager.IMPORTANCE_DEFAULT || channel.sound == null) return false
+    when (manager.currentInterruptionFilter) {
+      NotificationManager.INTERRUPTION_FILTER_NONE,
+      NotificationManager.INTERRUPTION_FILTER_ALARMS -> return false
+      NotificationManager.INTERRUPTION_FILTER_PRIORITY -> if (!channel.canBypassDnd()) return false
+    }
+    val audio = context.getSystemService(AudioManager::class.java)
+    return audio.ringerMode == AudioManager.RINGER_MODE_NORMAL &&
+      audio.getStreamVolume(AudioManager.STREAM_NOTIFICATION) > 0
+  }
 
   fun register(context: Context): Int {
     if (context.packageName != applicationId || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return 0
