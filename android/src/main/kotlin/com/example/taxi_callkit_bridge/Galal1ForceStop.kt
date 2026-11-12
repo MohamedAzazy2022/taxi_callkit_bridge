@@ -22,9 +22,12 @@ internal object Galal1ForceStop {
     val lastLaunch = prefs.getLong(lastLaunchKey, 0L)
     val now = System.currentTimeMillis()
     val exit = manager.getHistoricalProcessExitReasons(galal1Package, 0, 1).firstOrNull()
+    val description = exit?.description.orEmpty()
+    // Android 11 uses the plain description, newer AOSP releases add a subreason.
     val explicitStop = exit != null &&
       exit.reason == ApplicationExitInfo.REASON_USER_REQUESTED &&
-      exit.description?.startsWith("stop $galal1Package due to from pid ") == true
+      (description.startsWith("[FORCE STOP]") ||
+        description.startsWith("stop $galal1Package due to from pid "))
 
     stoppedAt = if (Build.VERSION.SDK_INT >= 35) {
       if (manager.getHistoricalProcessStartReasons(1).firstOrNull()?.wasForceStopped() == true) {
