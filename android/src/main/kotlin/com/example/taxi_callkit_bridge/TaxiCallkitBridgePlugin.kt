@@ -22,10 +22,22 @@ class TaxiCallkitBridgePlugin: FlutterPlugin, MethodCallHandler {
     appContext = flutterPluginBinding.applicationContext
     channel = MethodChannel(flutterPluginBinding.binaryMessenger, "taxi_callkit_bridge")
     channel.setMethodCallHandler(this)
+    try {
+      Galal1NotificationChannels.register(appContext)
+    } catch (error: RuntimeException) {
+      android.util.Log.e("Galal1Notifications", "Unable to register notification sounds", error)
+    }
   }
 
   override fun onMethodCall(call: MethodCall, result: Result) {
     when (call.method) {
+      "registerGalal1NotificationChannels" -> {
+        try {
+          result.success(Galal1NotificationChannels.register(appContext))
+        } catch (error: RuntimeException) {
+          result.error("notification_channels", error.message, null)
+        }
+      }
       "getPlatformVersion" -> {
         result.success("Android ${android.os.Build.VERSION.RELEASE}")
       }

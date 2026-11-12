@@ -1,0 +1,1 @@
+<resources xmlns:tools="http://schemas.android.com/tools" tools:keep="@raw/galal1_order_new,@raw/galal1_order_pending,@raw/galal1_order_cancel,@raw/galal1_chat_message,@raw/galal1_admin_chat,@raw/galal1_regional_order,@raw/galal1_payment,@raw/galal1_general,@raw/galal1_original_extra" />
