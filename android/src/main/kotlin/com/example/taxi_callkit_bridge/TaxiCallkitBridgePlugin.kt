@@ -52,6 +52,9 @@ class TaxiCallkitBridgePlugin: FlutterPlugin, MethodCallHandler {
           result.error("notification_channels", error.message, null)
         }
       }
+      "getGalal1NotificationSoundVersion" -> {
+        result.success(2)
+      }
       "getPlatformVersion" -> {
         result.success("Android ${android.os.Build.VERSION.RELEASE}")
       }

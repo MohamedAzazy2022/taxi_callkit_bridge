@@ -12,7 +12,10 @@ import android.os.Build
 internal object Galal1NotificationChannels {
   private const val applicationId = "com.galal.pear.admin"
 
+  private fun channelId(key: String) = "galal1_${key}_${if (key == "alex_order_loud") "v2" else "v1"}"
+
   private val names = linkedMapOf(
+    "alex_order_loud" to "أوردر adminAlex جديد — رنتان",
     "order_new" to "استقبال أوردر جديد",
     "order_pending" to "إعادة تعليق الأوردر",
     "order_cancel" to "إلغاء الأوردر",
@@ -26,7 +29,7 @@ internal object Galal1NotificationChannels {
 
   fun canPlaySound(context: Context, id: String?): Boolean {
     if (context.packageName != applicationId || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
-    if (id == null || names.keys.none { id == "galal1_${it}_v1" }) return false
+    if (id == null || names.keys.none { id == channelId(it) }) return false
     val manager = context.getSystemService(NotificationManager::class.java)
     val channel = manager.getNotificationChannel(id) ?: return false
     if (!manager.areNotificationsEnabled() ||
@@ -50,7 +53,7 @@ internal object Galal1NotificationChannels {
       .build()
 
     for ((key, label) in names) {
-      val id = "galal1_${key}_v1"
+      val id = channelId(key)
       // Existing channels may contain the user's sound, volume or mute preference.
       if (manager.getNotificationChannel(id) != null) continue
       val resource = "galal1_$key"

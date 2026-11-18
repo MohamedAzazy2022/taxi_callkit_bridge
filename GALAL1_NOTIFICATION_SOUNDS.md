@@ -25,3 +25,14 @@ paths cannot select Android system notification sounds.
 
 This change does not modify the CallKit fork, call handling, iOS behavior or the
 dependency revision used by the original Galal project.
+
+## adminAlex double alert (sound capability v2)
+
+`galal1_alex_order_loud_v2` uses `raw/galal1_alex_order_loud.wav`.
+The PCM recording contains two identical alert motifs with a short pause,
+so one OS notification plays both alerts without duplicate pushes.
+The channel has HIGH importance and notification audio usage. Existing v1
+channels and user sound preferences are preserved. The method
+`getGalal1NotificationSoundVersion` returns 2 only in builds with this resource.
+The server selects it only for new regional orders addressed to Alex office
+accounts with sound enabled and capability 2.
